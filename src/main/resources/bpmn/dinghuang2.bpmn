@@ -1,21 +1,15 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:activiti="http://activiti.org/bpmn" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:tns="http://sourceforge.net/bpmn/definitions/a123123" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:yaoqiang="http://bpmn.sourceforge.net" expressionLanguage="http://www.w3.org/1999/XPath" id="m1583310491794" name="" targetNamespace="http://sourceforge.net/bpmn/definitions/a123123" typeLanguage="http://www.w3.org/2001/XMLSchema">
-  <process id="dinghuangTest" isClosed="false" isExecutable="true" name="请假流程" processType="None">
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:activiti="http://activiti.org/bpmn" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:tns="http://sourceforge.net/bpmn/definitions/a123123" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:yaoqiang="http://bpmn.sourceforge.net" expressionLanguage="http://www.w3.org/1999/XPath" id="m1583310491791" name="" targetNamespace="http://sourceforge.net/bpmn/definitions/a123123" typeLanguage="http://www.w3.org/2001/XMLSchema">
+  <process id="dinghuangTest2" isClosed="false" isExecutable="true" name="请假流程" processType="None">
     <startEvent id="_2" name="开始"/>
     <userTask activiti:assignee="bilu" activiti:candidateGroups="manager" activiti:exclusive="true" id="_3" name="部门经理审批"/>
     <endEvent id="_4" name="结束"/>
     <sequenceFlow id="_5" sourceRef="_2" targetRef="_3"/>
-    <userTask activiti:candidateGroups="admin" activiti:exclusive="true" id="_7" name="A审批"/>
     <userTask activiti:exclusive="true" id="_11" name="B审批"/>
-    <userTask activiti:exclusive="true" id="_10" name="C审批"/>
+    <sequenceFlow id="_13" sourceRef="_11" targetRef="_4"/>
     <parallelGateway gatewayDirection="Unspecified" id="_6" name="ParallelGateway"/>
     <sequenceFlow id="_8" sourceRef="_3" targetRef="_6"/>
-    <sequenceFlow id="_12" sourceRef="_6" targetRef="_7"/>
     <sequenceFlow id="_15" sourceRef="_6" targetRef="_11"/>
-    <sequenceFlow id="_16" sourceRef="_6" targetRef="_10"/>
-    <sequenceFlow id="_9" sourceRef="_11" targetRef="_4"/>
-    <sequenceFlow id="_13" sourceRef="_10" targetRef="_4"/>
-    <sequenceFlow id="_14" sourceRef="_7" targetRef="_4"/>
   </process>
   <bpmndi:BPMNDiagram documentation="background=#3C3F41;count=1;horizontalcount=1;orientation=0;width=842.4;height=1195.2;imageableWidth=832.4;imageableHeight=1185.2;imageableX=5.0;imageableY=5.0" id="Diagram-_1" name="New Diagram">
     <bpmndi:BPMNPlane bpmnElement="dinghuangTest">
@@ -32,25 +26,13 @@
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape bpmnElement="_4" id="Shape-_4">
-        <dc:Bounds height="32.0" width="32.0" x="695.0" y="145.0"/>
+        <dc:Bounds height="32.0" width="32.0" x="675.0" y="395.0"/>
         <bpmndi:BPMNLabel>
           <dc:Bounds height="32.0" width="32.0" x="0.0" y="0.0"/>
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape bpmnElement="_7" id="Shape-_7">
-        <dc:Bounds height="55.0" width="85.0" x="475.0" y="40.0"/>
-        <bpmndi:BPMNLabel>
-          <dc:Bounds height="55.0" width="85.0" x="0.0" y="0.0"/>
-        </bpmndi:BPMNLabel>
-      </bpmndi:BPMNShape>
       <bpmndi:BPMNShape bpmnElement="_11" id="Shape-_11">
         <dc:Bounds height="55.0" width="85.0" x="470.0" y="145.0"/>
-        <bpmndi:BPMNLabel>
-          <dc:Bounds height="55.0" width="85.0" x="0.0" y="0.0"/>
-        </bpmndi:BPMNLabel>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape bpmnElement="_10" id="Shape-_10">
-        <dc:Bounds height="55.0" width="85.0" x="485.0" y="245.0"/>
         <bpmndi:BPMNLabel>
           <dc:Bounds height="55.0" width="85.0" x="0.0" y="0.0"/>
         </bpmndi:BPMNLabel>
@@ -61,16 +43,9 @@
           <dc:Bounds height="32.0" width="32.0" x="0.0" y="0.0"/>
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNEdge bpmnElement="_13" id="BPMNEdge__13" sourceElement="_10" targetElement="_4">
-        <di:waypoint x="570.0" y="272.5"/>
-        <di:waypoint x="695.0" y="161.0"/>
-        <bpmndi:BPMNLabel>
-          <dc:Bounds height="0.0" width="0.0" x="0.0" y="0.0"/>
-        </bpmndi:BPMNLabel>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge bpmnElement="_12" id="BPMNEdge__12" sourceElement="_6" targetElement="_7">
-        <di:waypoint x="302.0" y="171.0"/>
-        <di:waypoint x="475.0" y="67.5"/>
+      <bpmndi:BPMNEdge bpmnElement="_13" id="BPMNEdge__13" sourceElement="_11" targetElement="_4">
+        <di:waypoint x="555.0" y="172.5"/>
+        <di:waypoint x="675.0" y="411.0"/>
         <bpmndi:BPMNLabel>
           <dc:Bounds height="0.0" width="0.0" x="0.0" y="0.0"/>
         </bpmndi:BPMNLabel>
@@ -78,20 +53,6 @@
       <bpmndi:BPMNEdge bpmnElement="_15" id="BPMNEdge__15" sourceElement="_6" targetElement="_11">
         <di:waypoint x="302.0" y="171.0"/>
         <di:waypoint x="470.0" y="172.5"/>
-        <bpmndi:BPMNLabel>
-          <dc:Bounds height="0.0" width="0.0" x="0.0" y="0.0"/>
-        </bpmndi:BPMNLabel>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge bpmnElement="_14" id="BPMNEdge__14" sourceElement="_7" targetElement="_4">
-        <di:waypoint x="560.0" y="67.5"/>
-        <di:waypoint x="695.0" y="161.0"/>
-        <bpmndi:BPMNLabel>
-          <dc:Bounds height="0.0" width="0.0" x="0.0" y="0.0"/>
-        </bpmndi:BPMNLabel>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge bpmnElement="_16" id="BPMNEdge__16" sourceElement="_6" targetElement="_10">
-        <di:waypoint x="302.0" y="171.0"/>
-        <di:waypoint x="485.0" y="272.5"/>
         <bpmndi:BPMNLabel>
           <dc:Bounds height="0.0" width="0.0" x="0.0" y="0.0"/>
         </bpmndi:BPMNLabel>
@@ -106,13 +67,6 @@
       <bpmndi:BPMNEdge bpmnElement="_8" id="BPMNEdge__8" sourceElement="_3" targetElement="_6">
         <di:waypoint x="180.0" y="162.5"/>
         <di:waypoint x="270.0" y="171.0"/>
-        <bpmndi:BPMNLabel>
-          <dc:Bounds height="0.0" width="0.0" x="0.0" y="0.0"/>
-        </bpmndi:BPMNLabel>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge bpmnElement="_9" id="BPMNEdge__9" sourceElement="_11" targetElement="_4">
-        <di:waypoint x="555.0" y="172.5"/>
-        <di:waypoint x="695.0" y="161.0"/>
         <bpmndi:BPMNLabel>
           <dc:Bounds height="0.0" width="0.0" x="0.0" y="0.0"/>
         </bpmndi:BPMNLabel>

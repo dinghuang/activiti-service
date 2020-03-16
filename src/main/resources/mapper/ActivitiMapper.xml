@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="org.dinghuang.activiti.infra.repository.ActivitiRepository">
+
+
+    <delete id="deleteRuIdentityLinkByTaskId">
+        delete from act_ru_identitylink where task_id_ = #{taskId};
+    </delete>
+    <delete id="deleteIdentityLinkByTaskId">
+        delete from act_hi_identitylink where task_id_ = #{taskId};
+    </delete>
+    <delete id="deleteDetailByTaskId">
+        delete from act_hi_detail where task_id_ = #{taskId};
+    </delete>
+    <delete id="deleteCommonByTaskId">
+        delete from act_hi_comment where task_id_ = #{taskId};
+    </delete>
+    <delete id="deleteAttachmentByTaskId">
+        delete from act_hi_attachment where task_id_ = #{taskId};
+    </delete>
+    <delete id="deleteExecutionById">
+        delete from act_ru_execution where id_ = #{executionId};
+    </delete>
+
+    <delete id="deleteEvtLogByExecutionId">
+        delete from act_evt_log where execution_id_ = #{executionId};
+    </delete>
+    <delete id="deleteDetailByExecutionId">
+        delete from act_hi_detail where execution_id_ = #{executionId};
+    </delete>
+    <delete id="deleteVarinstByExecutionId">
+        delete from act_hi_varinst where execution_id_ = #{executionId};
+    </delete>
+    <delete id="deleteTaskinstByExecutionId">
+        delete from act_hi_taskinst where execution_id_ = #{executionId};
+    </delete>
+    <delete id="deleteDeadletterJobByExecutionId">
+        delete from act_ru_deadletter_job where execution_id_ = #{executionId};
+    </delete>
+    <delete id="deleteEventSubscrByExecutionId">
+        delete from act_ru_event_subscr where execution_id_ = #{executionId};
+    </delete>
+    <delete id="deleteIntegrationByExecutionId">
+        delete from act_ru_integration where execution_id_ = #{executionId};
+    </delete>
+    <delete id="deleteJobByExecutionId">
+       delete from act_ru_job where execution_id_ = #{executionId};
+    </delete>
+    <delete id="deleteTimerJobByExecutionId">
+      delete from act_ru_timer_job where execution_id_ = #{executionId};
+    </delete>
+    <delete id="deleteSusoendedJobByExecutionId">
+      delete from act_ru_suspended_job where execution_id_ = #{executionId};
+    </delete>
+    <delete id="deleteVariableByExecutionId">
+      delete from act_ru_variable where execution_id_ = #{executionId};
+    </delete>
+    <delete id="deleteTaskByExecutionId">
+      delete from act_ru_task where execution_id_ = #{executionId};
+    </delete>
+    <delete id="deleteActinstByExecutionId">
+        delete from act_hi_actinst where execution_id_ = #{executionId};
+    </delete>
+</mapper>
