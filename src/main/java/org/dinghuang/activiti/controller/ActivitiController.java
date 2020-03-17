@@ -74,6 +74,16 @@ public class ActivitiController {
         return new ResponseEntity<>(true, HttpStatus.OK);
     }
 
+    @PostMapping(value = "/back2")
+    @ApiOperation(value = "撤回2")
+    public ResponseEntity<Boolean> backTwo(@ApiParam(value = "taskId", required = true)
+                                           @RequestParam String taskId,
+                                           @ApiParam(value = "targetTaskId", required = true)
+                                           @RequestParam String targetTaskId) {
+        activitiUtils.backTwo(taskId, targetTaskId);
+        return new ResponseEntity<>(true, HttpStatus.OK);
+    }
+
     @GetMapping(value = "/show_img")
     @ApiOperation(value = "查看当前流程图")
     public void showImg(@ApiParam(value = "xml中定义的实例id", required = true)

@@ -15,6 +15,8 @@ import org.activiti.engine.runtime.ProcessInstance;
 import org.activiti.engine.task.Task;
 import org.activiti.image.impl.DefaultProcessDiagramGenerator;
 import org.apache.commons.io.FileUtils;
+import org.dinghuang.activiti.conf.DeleteTaskCmd;
+import org.dinghuang.activiti.conf.SetFLowNodeAndGoCmd;
 import org.dinghuang.activiti.infra.repository.ActivitiRepository;
 import org.dinghuang.core.exception.CommonValidateException;
 import org.slf4j.Logger;
@@ -661,7 +663,7 @@ public class ActivitiUtils {
                 //todo 并行这种还有点问题
                 List<HistoricActivityInstance> newHistoricActivityInstanceList = new ArrayList<>(historicActivityInstanceList.size());
                 for (int i = 0; i < historicActivityInstanceList.size(); i++) {
-                    if (historicActivityInstanceList.get(i).getTaskId() == null || !historicActivityInstanceList.get(i).getTaskId().equals(tasks.get(tasks.size() - 1).getId())) {
+                    if (historicActivityInstanceList.get(i).getTaskId() == null || !historicActivityInstanceList.get(i).getActivityId().equals(tasks.get(tasks.size() - 1).getTaskDefinitionKey())) {
                         newHistoricActivityInstanceList.add(historicActivityInstanceList.get(i));
                     } else {
                         newHistoricActivityInstanceList.add(historicActivityInstanceList.get(i));
@@ -805,6 +807,30 @@ public class ActivitiUtils {
         // 复原流程
         currentNode.setOutgoingFlows(outComingSequenceFlows);
 
+    }
+
+    public void backTwo(String taskId, String targetTaskId) {
+        RepositoryService repositoryService = processEngine
+                .getRepositoryService();
+        // 当前任务
+        TaskService taskService = processEngine.getTaskService();
+        ManagementService managementService = processEngine
+                .getManagementService();
+        Task currentTask = taskService.createTaskQuery().taskId(taskId)
+                .singleResult();
+        HistoricTaskInstance historicTaskInstances = historyService.createHistoricTaskInstanceQuery().taskId(targetTaskId).singleResult();
+
+        // 获取流程定义
+        org.activiti.bpmn.model.Process process = repositoryService
+                .getBpmnModel(currentTask.getProcessDefinitionId())
+                .getMainProcess();
+        FlowNode targetNode = (FlowNode) process.getFlowElement(historicTaskInstances.getTaskDefinitionKey());
+        // 删除当前运行任务
+        String executionEntityId = managementService
+                .executeCommand(new DeleteTaskCmd(currentTask.getId()));
+        // 流程执行到来源节点
+        managementService.executeCommand(new SetFLowNodeAndGoCmd(
+                targetNode, executionEntityId));
     }
 
 }
