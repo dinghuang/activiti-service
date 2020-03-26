@@ -4,7 +4,7 @@ spring:
   application:
     name: activiti-service
   datasource:
-    url: jdbc:postgresql://localhost:5432/postgres
+    url: jdbc:postgresql://127.0.0.1:5432/postgres
     username: postgres
     password: password
 #    url: jdbc:mysql://localhost/activiti?useUnicode=true&characterEncoding=utf-8&useSSL=false

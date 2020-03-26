@@ -56,7 +56,7 @@
                     alert("暂无流程！");
                     return;
                 }
-                var imgHtml = '<embed src="/v1/activiti/show_img?instanceKey=' + instanceId + '" style="display:block;width:1000px;height:450px" />';
+                var imgHtml = '<embed src="/v1/activiti/show_img?instanceKey=' + instanceId + '" style="display:block;width:10000px;height:10000px" />';
                 $(".result-div").html(imgHtml);
             });
 
@@ -98,7 +98,7 @@
 <!-- 结果栏 -->
 <div class="result-div">
     <embed src="/v1/activiti/show_img"
-           style="display:block;width:1000px;height:450px"/>
+           style="display:block;width:10000px;height:10000px"/>
     <br>
 </div>
 </body>

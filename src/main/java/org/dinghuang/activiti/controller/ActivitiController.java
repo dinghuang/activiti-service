@@ -3,6 +3,7 @@ package org.dinghuang.activiti.controller;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
+import org.apache.commons.lang3.StringUtils;
 import org.dinghuang.activiti.dto.TaskDTO;
 import org.dinghuang.activiti.util.ActivitiUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,8 +18,10 @@ import org.springframework.web.servlet.ModelAndView;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author dinghuang123@gmail.com
@@ -59,8 +62,16 @@ public class ActivitiController {
     @PostMapping(value = "/approve")
     @ApiOperation(value = "完成任务")
     public ResponseEntity<Boolean> managerApprove(@ApiParam(value = "taskId", required = true)
-                                                  @RequestParam String taskId) {
-        activitiUtils.completeTask(taskId, null);
+                                                  @RequestParam String taskId,
+                                                  @ApiParam(value = "任务参数key")
+                                                  @RequestParam(required = false) String key,
+                                                  @ApiParam(value = "任务参数value")
+                                                  @RequestParam(required = false) Object value) {
+        Map<String, Object> variables = new HashMap<>(1);
+        if (StringUtils.isNoneEmpty(key) && StringUtils.isNoneBlank(key)) {
+            variables.put(key, value);
+        }
+        activitiUtils.completeTask(taskId, variables);
         return new ResponseEntity<>(true, HttpStatus.OK);
     }
 
