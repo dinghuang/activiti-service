@@ -3,6 +3,7 @@ package org.dinghuang.activiti.controller;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
+import org.activiti.bpmn.model.FlowElement;
 import org.apache.commons.lang3.StringUtils;
 import org.dinghuang.activiti.dto.TaskDTO;
 import org.dinghuang.activiti.util.ActivitiUtils;
@@ -14,8 +15,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.ModelAndView;
 
+import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -93,10 +96,16 @@ public class ActivitiController {
 
     @ApiOperation(value = "跳转到测试主页面")
     @GetMapping(value = "/index")
-    public ModelAndView index() {
+    public ModelAndView index(HttpServletRequest httpServletRequest) {
         ModelAndView mv = new ModelAndView();
         mv.setViewName("/index.html");
         return mv;
+    }
+
+    @PostMapping("import")
+    @ApiOperation(value = "导入流程定义")
+    public ResponseEntity<List<FlowElement>> importXml(@RequestParam("file") MultipartFile file) {
+        return new ResponseEntity<>(activitiUtils.importXml(file), HttpStatus.OK);
     }
 
 }

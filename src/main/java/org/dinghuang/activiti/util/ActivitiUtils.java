@@ -17,12 +17,14 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.dinghuang.activiti.conf.DeleteTaskCmd;
 import org.dinghuang.activiti.conf.SetFLowNodeAndGoCmd;
+import org.dinghuang.activiti.infra.repository.ActivitiRepository;
 import org.dinghuang.core.exception.CommonValidateException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.File;
@@ -60,6 +62,12 @@ public class ActivitiUtils {
     private ProcessRuntime processRuntime;
     @Autowired
     private HistoryService historyService;
+    @Autowired
+    private ActivitiRepository activitiRepository;
+
+    public RepositoryService getRepositoryService() {
+        return this.repositoryService;
+    }
 
     /**
      * 根据路径部署(还有Inputstream addInputStream、字符串方式 addString部署、压缩包方式 addZipInputStream)
@@ -957,4 +965,32 @@ public class ActivitiUtils {
         return tasks;
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public List<FlowElement> importXml(MultipartFile file) {
+        List<FlowElement> flowElements = new LinkedList<>();
+        try {
+            InputStream fileInputStream = file.getInputStream();
+            Deployment deployment = repositoryService.createDeployment()
+                    .addInputStream(file.getName() + ".bpmn", fileInputStream)
+                    .key(IdWorker.getIdStr())
+                    .deploy();
+            ProcessDefinition processDefinition = repositoryService.createProcessDefinitionQuery().deploymentId(deployment.getId()).singleResult();
+            BpmnModel model = repositoryService.getBpmnModel(processDefinition.getId());
+            if (model != null) {
+                Collection<FlowElement> flowElementCollection = model.getMainProcess().getFlowElements();
+                for (FlowElement e : flowElementCollection) {
+                    if (e.getClass().toString().equals("class:class org.activiti.bpmn.model.UserTask")) {
+                        //todo 可以在这里用一个中间表去维护每个任务的处理人
+                        e.setId(IdWorker.getIdStr());
+                        flowElements.add(e);
+                    }
+                    LOGGER.info("flowelement id:" + e.getId() + "  name:" + e.getName() + "   class:" + e.getClass().toString());
+                }
+            }
+            activitiRepository.updateActReProcdef(processDefinition.getId());
+        } catch (Exception e) {
+            LOGGER.error("导入流程定义失败:{}", e.getMessage(), e);
+        }
+        return flowElements;
+    }
 }
