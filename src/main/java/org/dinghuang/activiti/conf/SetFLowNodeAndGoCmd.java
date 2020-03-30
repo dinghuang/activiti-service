@@ -32,11 +32,9 @@ public class SetFLowNodeAndGoCmd implements Command<Void> {
             throw new ActivitiException("回退错误，目标节点没有来源连线");
         }
         // 随便选一条连线来执行，当前执行计划为，从连线流转到目标节点，实现跳转
-        ExecutionEntity executionEntity = commandContext
-                .getExecutionEntityManager().findById(executionId);
+        ExecutionEntity executionEntity = commandContext.getExecutionEntityManager().findById(executionId);
         executionEntity.setCurrentFlowElement(flows.get(0));
-        commandContext.getAgenda().planTakeOutgoingSequenceFlowsOperation(
-                executionEntity, true);
+        commandContext.getAgenda().planTakeOutgoingSequenceFlowsOperation(executionEntity, true);
         return null;
     }
 }

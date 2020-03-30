@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.servlet.ModelAndView;
 
-import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -66,7 +65,7 @@ public class ActivitiController {
                                                   @ApiParam(value = "任务参数key")
                                                   @RequestParam(required = false) String key,
                                                   @ApiParam(value = "任务参数value")
-                                                  @RequestParam(required = false) Object value) {
+                                                  @RequestParam(required = false) String value) {
         Map<String, Object> variables = new HashMap<>(1);
         if (StringUtils.isNoneEmpty(key) && StringUtils.isNoneBlank(key)) {
             variables.put(key, value);
@@ -77,34 +76,24 @@ public class ActivitiController {
 
     @PostMapping(value = "/back")
     @ApiOperation(value = "撤回")
-    public ResponseEntity<Boolean> back(@ApiParam(value = "taskId", required = true)
-                                        @RequestParam String taskId,
-                                        @ApiParam(value = "processInstanceId", required = true)
-                                        @RequestParam String processInstanceId) {
-        activitiUtils.backTask(taskId, processInstanceId);
-        return new ResponseEntity<>(true, HttpStatus.OK);
-    }
-
-    @PostMapping(value = "/back2")
-    @ApiOperation(value = "撤回2")
-    public ResponseEntity<Boolean> backTwo(@ApiParam(value = "taskId", required = true)
-                                           @RequestParam String taskId,
-                                           @ApiParam(value = "targetTaskId", required = true)
-                                           @RequestParam String targetTaskId) {
-        activitiUtils.backTwo(taskId, targetTaskId);
+    public ResponseEntity<Boolean> back(@ApiParam(value = "currentTaskId", required = true)
+                                        @RequestParam String currentTaskId,
+                                        @ApiParam(value = "目标任务，如果为空，默认返回上级，如果找到上级有2个，那目标任务必须得传")
+                                        @RequestParam(required = false) String targetTaskId) {
+        activitiUtils.backTask(currentTaskId, targetTaskId);
         return new ResponseEntity<>(true, HttpStatus.OK);
     }
 
     @GetMapping(value = "/show_img")
     @ApiOperation(value = "查看当前流程图")
-    public void showImg(@ApiParam(value = "xml中定义的实例id", required = true)
+    public void showImg(@ApiParam(value = "实例id", required = true)
                         @RequestParam(required = false) String instanceKey, HttpServletResponse response) {
         activitiUtils.showImg(instanceKey, response);
     }
 
     @ApiOperation(value = "跳转到测试主页面")
     @GetMapping(value = "/index")
-    public ModelAndView index(HttpServletRequest req) {
+    public ModelAndView index() {
         ModelAndView mv = new ModelAndView();
         mv.setViewName("/index.html");
         return mv;

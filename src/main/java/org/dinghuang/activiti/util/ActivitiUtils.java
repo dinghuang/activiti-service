@@ -4,20 +4,19 @@ import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import org.activiti.api.process.model.builders.ProcessPayloadBuilder;
 import org.activiti.api.process.runtime.ProcessRuntime;
 import org.activiti.bpmn.model.*;
-import org.activiti.bpmn.model.Process;
 import org.activiti.engine.*;
 import org.activiti.engine.history.*;
+import org.activiti.engine.impl.HistoricTaskInstanceQueryProperty;
 import org.activiti.engine.repository.Deployment;
 import org.activiti.engine.repository.ProcessDefinition;
 import org.activiti.engine.repository.ProcessDefinitionQuery;
 import org.activiti.engine.runtime.Execution;
-import org.activiti.engine.runtime.ProcessInstance;
 import org.activiti.engine.task.Task;
 import org.activiti.image.impl.DefaultProcessDiagramGenerator;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.dinghuang.activiti.conf.DeleteTaskCmd;
 import org.dinghuang.activiti.conf.SetFLowNodeAndGoCmd;
-import org.dinghuang.activiti.infra.repository.ActivitiRepository;
 import org.dinghuang.core.exception.CommonValidateException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +44,9 @@ public class ActivitiUtils {
     private static final Logger LOGGER = LoggerFactory.getLogger(ActivitiUtils.class);
 
     private static final String USER_TASK = "userTask";
+    private static final String PARALLEL_GATEWAY = "parallelGateway";
+    private static final String EXCLUSIVE_GATEWAY = "exclusiveGateway";
+    private static final String BPMN_NOT_SUPPORT = "bpmn not support";
 
     @Autowired
     private ProcessEngine processEngine;
@@ -58,8 +60,6 @@ public class ActivitiUtils {
     private ProcessRuntime processRuntime;
     @Autowired
     private HistoryService historyService;
-    @Autowired
-    private ActivitiRepository activitiRepository;
 
     /**
      * 根据路径部署(还有Inputstream addInputStream、字符串方式 addString部署、压缩包方式 addZipInputStream)
@@ -437,7 +437,7 @@ public class ActivitiUtils {
      * @param historicActivityInstances 历史流程已经执行的节点，并已经按执行的先后顺序排序
      * @return List<String> 流程走过的线
      */
-    public List<String> getHighLightedFlows(BpmnModel bpmnModel, List<HistoricActivityInstance> historicActivityInstances, List<String> taskIds) {
+    public List<String> getHighLightedFlows(BpmnModel bpmnModel, List<HistoricActivityInstance> historicActivityInstances, List<String> taskIds, String processInstanceId) {
         // 用以保存高亮的线flowId
         List<String> highFlows = new ArrayList<>();
         if (historicActivityInstances == null || historicActivityInstances.size() == 0) {
@@ -446,6 +446,11 @@ public class ActivitiUtils {
         Map<String, HistoricActivityInstance> historicActivityInstanceMap = historicActivityInstances.stream()
                 .collect(Collectors.toMap(HistoricActivityInstance::getActivityId,
                         historicActivityInstance -> historicActivityInstance, BinaryOperator.maxBy(Comparator.comparing(HistoricActivityInstance::getId))));
+        List<HistoricVariableInstance> historicVariableInstances = historyService.createHistoricVariableInstanceQuery()
+                .processInstanceId(historicActivityInstances.get(0).getProcessInstanceId()).list();
+        Map<String, HistoricVariableInstance> historicVariableInstanceMap = historicVariableInstances.stream()
+                .collect(Collectors.toMap(HistoricVariableInstance::getVariableName,
+                        historicVariableInstance -> historicVariableInstance, BinaryOperator.maxBy(Comparator.comparing(HistoricVariableInstance::getId))));
         // 遍历历史节点
         for (int i = 0; i < historicActivityInstances.size() - 1; i++) {
             // 取出已执行的节点
@@ -492,10 +497,15 @@ public class ActivitiUtils {
                 if (historicActivityInstanceMap.get(pvmTransition.getSourceRef()) != null) {
                     if (taskIds != null && !taskIds.isEmpty()) {
                         if (!taskIds.contains(historicActivityInstanceMap.get(pvmTransition.getSourceRef()).getTaskId())) {
-                            highFlows.add(pvmTransition.getId());
+                            //有些线是有条件的
+                            if (historicActivityInstanceMap.get(pvmTransition.getTargetRef()) != null && querySequenceFlowCondition(pvmTransition, historicVariableInstanceMap)) {
+                                highFlows.add(pvmTransition.getId());
+                            }
                         }
                     } else {
-                        highFlows.add(pvmTransition.getId());
+                        if (historicActivityInstanceMap.get(pvmTransition.getTargetRef()) != null && querySequenceFlowCondition(pvmTransition, historicVariableInstanceMap)) {
+                            highFlows.add(pvmTransition.getId());
+                        }
                     }
                 }
             }
@@ -503,6 +513,23 @@ public class ActivitiUtils {
 
         //返回高亮的线
         return highFlows;
+    }
+
+    private boolean querySequenceFlowCondition(SequenceFlow pvmTransition, Map<String, HistoricVariableInstance> historicVariableInstanceMap) {
+        String conditionExpression = pvmTransition.getConditionExpression();
+        if (StringUtils.isNotEmpty(conditionExpression) && StringUtils.isNotBlank(conditionExpression)) {
+            conditionExpression = conditionExpression.substring(conditionExpression.indexOf('{') + 1, conditionExpression.indexOf('}'));
+            List<String> strings = Arrays.asList(conditionExpression.split("=="));
+            strings.forEach(s -> s = s.replace(" ", ""));
+            if (historicVariableInstanceMap.get(strings.get(0)).getValue().equals(strings.get(1).replaceAll("\"", ""))) {
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            return true;
+        }
+
     }
 
 
@@ -678,159 +705,256 @@ public class ActivitiUtils {
         List<String> executedActivityIdList = historicActivityInstanceList.stream().map(HistoricActivityInstance::getActivityId).collect(Collectors.toList());
 
         //获取流程走过的线
-        List<String> flowIds = getHighLightedFlows(bpmnModel, historicActivityInstanceList, taskIds);
+        List<String> flowIds = getHighLightedFlows(bpmnModel, historicActivityInstanceList, taskIds, instanceKey);
 
         //输出图像，并设置高亮
         outputImg(response, bpmnModel, flowIds, executedActivityIdList);
     }
 
     /**
-     * 获取当前任务节点，将节点连线反转，走回上一节点，再对流程进行修改回来。
+     * 撤回任务
      *
-     * @param currentTaskId     currentTaskId
-     * @param processInstanceId processInstanceId
+     * @param currentTaskId currentTaskId
+     * @param targetTaskId  targetTaskId 目标任务，如果为空，默认返回上级，如果找到上级有2个，那目标任务必须得传
      */
-    public void backTask(String currentTaskId, String processInstanceId) {
-        ProcessInstance processInstance = runtimeService.createProcessInstanceQuery().processInstanceId(processInstanceId).singleResult();
-        if (null == processInstance) {
-            throw new CommonValidateException("该流程已完成!无法回退");
-        }
-        List<Task> taskList = taskService.createTaskQuery().processInstanceId(processInstance.getId()).list();
-        if (taskList == null) {
-            throw new CommonValidateException("该流程已完成!无法回退");
-        } else {
-            List<String> taskIds = taskList.stream().map(Task::getId).collect(Collectors.toList());
-            if (!taskIds.contains(currentTaskId)) {
-                throw new CommonValidateException("当前任务已更新，请重试");
-            }
-        }
-//        if (!"bilu".equals(historicTaskInstance.getAssignee())) {
-//            throw new CommonValidateException("只有当前处理人才可以回退任务");
-//        }
-        // 查询历史节点
-        List<HistoricTaskInstance> historicTaskInstances = historyService.createHistoricTaskInstanceQuery().processInstanceId(processInstanceId).list();
-        //根据id排序
-        historicTaskInstances = historicTaskInstances.stream().sorted(Comparator.comparing(HistoricTaskInstance::getId)).collect(Collectors.toList());
-        //处理撤回这种情况
-        HistoricTaskInstance historicTaskInstance = null;
-        // 获取流程定义对象
-        BpmnModel bpmnModel = repositoryService.getBpmnModel(processInstance.getProcessDefinitionId());
-        Process process = bpmnModel.getProcessById(processInstance.getProcessDefinitionKey());
-        if (taskList.size() == 1) {
-            //串行
-            for (int i = 0; i < historicTaskInstances.size(); i++) {
-                if (historicTaskInstances.get(i).getTaskDefinitionKey().equals(taskList.get(0).getTaskDefinitionKey())) {
-                    historicTaskInstance = historicTaskInstances.get(i - 1);
-                    break;
-                }
-            }
-            if (historicTaskInstance == null) {
-                throw new CommonValidateException("上一任务不存在，无法回退");
-            }
-
-            FlowNode sourceNode = (FlowNode) process.getFlowElement(historicTaskInstance.getTaskDefinitionKey());
-            handleSerial(taskList.get(0), process, sourceNode);
-        } else {
-            //todo 并行这种还有点问题
-            Map<String, List<Task>> historicActivityInstanceMap = new HashMap<>();
-            Map<String, HistoricTaskInstance> historicTaskInstanceHashMap = historicTaskInstances.stream().collect(Collectors.toMap(HistoricTaskInstance::getId, Function.identity()));
-            List<String> taskIds = taskList.stream().map(Task::getId).collect(Collectors.toList());
-            for (int i = 0; i < taskList.size(); i++) {
-                for (int j = historicTaskInstances.size() - 1; j > 0; j--) {
-                    if (historicTaskInstances.get(j).getId().equals(taskList.get(i).getId())) {
-                        for (int k = j - 1; k >= 0; k--) {
-                            if (!taskIds.contains(historicTaskInstances.get(k).getId())) {
-                                if (historicActivityInstanceMap.get(historicTaskInstances.get(k).getId()) == null) {
-                                    List<Task> tasks = new ArrayList<>();
-                                    tasks.add(taskList.get(i));
-                                    historicActivityInstanceMap.put(historicTaskInstances.get(k).getId(), tasks);
-                                } else {
-                                    historicActivityInstanceMap.get(historicTaskInstances.get(k).getId()).add(taskList.get(i));
-                                }
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            historicActivityInstanceMap.forEach((k, v) -> {
-                FlowNode sourceNode = (FlowNode) process.getFlowElement(historicTaskInstanceHashMap.get(k).getTaskDefinitionKey());
-                List<Task> tasks = v;
-                for (int i = 0; i < tasks.size(); i++) {
-                    if (tasks.get(i).getId().equals(currentTaskId)) {
-                        handleSerial(tasks.get(i), process, sourceNode);
-                    } else {
-                        activitiRepository.deleteEvtLogByExecutionId(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteDetailByExecutionId(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteVarinstByExecutionId(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteTaskinstByExecutionId(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteDeadletterJobByExecutionId(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteEventSubscrByExecutionId(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteIntegrationByExecutionId(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteJobByExecutionId(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteTimerJobByExecutionId(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteSusoendedJobByExecutionId(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteVariableByExecutionId(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteRuIdentityLinkByTaskId(tasks.get(i).getId());
-                        activitiRepository.deleteTaskByExecutionId(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteExecutionById(tasks.get(i).getExecutionId());
-                        activitiRepository.deleteAttachmentByTaskId(tasks.get(i).getId());
-                        activitiRepository.deleteCommonByTaskId(tasks.get(i).getId());
-                        activitiRepository.deleteDetailByTaskId(tasks.get(i).getId());
-                        activitiRepository.deleteIdentityLinkByTaskId(tasks.get(i).getId());
-                        activitiRepository.deleteActinstByExecutionId(tasks.get(i).getExecutionId());
-                    }
-                }
-
-            });
-
-        }
-    }
-
-    private void handleSerial(Task obj, Process process, FlowNode sourceNode) {
-        FlowNode currentNode = (FlowNode) process.getFlowElement(obj.getTaskDefinitionKey());
-        // 获取原本流程连线
-        List<SequenceFlow> outComingSequenceFlows = currentNode.getOutgoingFlows();
-
-        // 配置反转流程连线
-        SequenceFlow sequenceFlow = new SequenceFlow();
-        sequenceFlow.setTargetFlowElement(sourceNode);
-        sequenceFlow.setSourceFlowElement(currentNode);
-        sequenceFlow.setId("callback-flow");
-
-        List<SequenceFlow> newOutComingSequenceFlows = new ArrayList<>();
-        newOutComingSequenceFlows.add(sequenceFlow);
-        currentNode.setOutgoingFlows(newOutComingSequenceFlows);
-
-        // 完成任务
-        taskService.complete(obj.getId());
-        // 复原流程
-        currentNode.setOutgoingFlows(outComingSequenceFlows);
-
-    }
-
-    public void backTwo(String taskId, String targetTaskId) {
-        RepositoryService repositoryService = processEngine
-                .getRepositoryService();
-        // 当前任务
+    @Transactional(rollbackFor = Exception.class)
+    public void backTask(String currentTaskId, String targetTaskId) {
+        //准备数据
+        RepositoryService repositoryService = processEngine.getRepositoryService();
         TaskService taskService = processEngine.getTaskService();
-        ManagementService managementService = processEngine
-                .getManagementService();
-        Task currentTask = taskService.createTaskQuery().taskId(taskId)
-                .singleResult();
-        HistoricTaskInstance historicTaskInstances = historyService.createHistoricTaskInstanceQuery().taskId(targetTaskId).singleResult();
-
+        // 当前任务
+        Task currentTask = taskService.createTaskQuery().taskId(currentTaskId).singleResult();
+        String processInstanceId = currentTask.getProcessInstanceId();
         // 获取流程定义
         org.activiti.bpmn.model.Process process = repositoryService
                 .getBpmnModel(currentTask.getProcessDefinitionId())
                 .getMainProcess();
-        FlowNode targetNode = (FlowNode) process.getFlowElement(historicTaskInstances.getTaskDefinitionKey());
-        // 删除当前运行任务
-        String executionEntityId = managementService
-                .executeCommand(new DeleteTaskCmd(currentTask.getId()));
+        //任务历史数据
+        List<HistoricTaskInstance> historicTaskInstances = historyService
+                .createHistoricTaskInstanceQuery()
+                .processInstanceId(currentTask.getProcessInstanceId())
+                .orderBy(HistoricTaskInstanceQueryProperty.HISTORIC_TASK_INSTANCE_ID)
+                .desc()
+                .list();
+        Map<String, HistoricTaskInstance> historicTaskInstanceMap = historicTaskInstances.stream().collect(Collectors.toMap(HistoricTaskInstance::getId, Function.identity()));
+        //所有节点操作数据
+        HistoricActivityInstanceQuery historyInstanceQuery = historyService.createHistoricActivityInstanceQuery().processInstanceId(processInstanceId);
+        List<HistoricActivityInstance> historicActivityInstanceList = historyInstanceQuery.orderByHistoricActivityInstanceStartTime().asc().list();
+        Map<String, List<HistoricActivityInstance>> historicActivityInstanceMap = historicActivityInstanceList.stream().collect(Collectors.groupingBy(HistoricActivityInstance::getActivityId));
+        Map<String, FlowNode> flowNodeMap = new HashMap<>(historicActivityInstanceList.size());
+        for (HistoricActivityInstance historicActivityInstance : historicActivityInstanceList) {
+            if (flowNodeMap.get(historicActivityInstance.getActivityId()) == null) {
+                FlowNode sourceNode = (FlowNode) process.getFlowElement(historicActivityInstance.getActivityId());
+                flowNodeMap.put(historicActivityInstance.getActivityId(), sourceNode);
+            }
+        }
+        //排除当前任务外的所有正在进行的任务
+        List<Task> taskList = taskService.createTaskQuery().processInstanceId(processInstanceId).list().stream().filter(task -> !task.getId().equals(currentTask.getId())).collect(Collectors.toList());
+        handleBackTask(currentTask, currentTask.getTaskDefinitionKey(), targetTaskId, historicTaskInstanceMap, historicActivityInstanceMap, flowNodeMap, taskList, historicActivityInstanceList);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void handleBackTask(Task currentTask, String taskDefinitionKey, String targetTaskId, Map<String, HistoricTaskInstance> historicTaskInstanceMap, Map<String, List<HistoricActivityInstance>> historicActivityInstanceMap, Map<String, FlowNode> flowNodeMap, List<Task> taskList, List<HistoricActivityInstance> historicActivityInstanceList) {
+        //判断是否并行
+        if (taskList == null || taskList.isEmpty()) {
+            //串行
+            handleSerial(currentTask, taskDefinitionKey, targetTaskId, historicTaskInstanceMap, historicActivityInstanceMap, flowNodeMap, taskList, historicActivityInstanceList);
+        } else {
+            //并行
+            handleParallel(currentTask, taskDefinitionKey, targetTaskId, historicTaskInstanceMap, historicActivityInstanceMap, flowNodeMap, taskList, historicActivityInstanceList);
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void handleParallel(Task currentTask, String taskDefinitionKey, String targetTaskId, Map<String, HistoricTaskInstance> historicTaskInstanceMap, Map<String, List<HistoricActivityInstance>> historicActivityInstanceMap, Map<String, FlowNode> flowNodeMap, List<Task> taskList, List<HistoricActivityInstance> historicActivityInstanceList) {
+        List<SequenceFlow> sequenceFlows = flowNodeMap.get(taskDefinitionKey).getIncomingFlows();
+        if (sequenceFlows.size() == 1) {
+            //当前节点的上级节点只有一条
+            SequenceFlow sequenceFlow = sequenceFlows.get(0);
+            //查询历史节点
+            HistoricActivityInstance historicActivityInstance = historicActivityInstanceList.stream().filter(query -> query.getActivityId().equals(sequenceFlow.getSourceRef())).collect(Collectors.toList()).get(0);
+            //判断来源类型
+            if (historicActivityInstance.getActivityType().equals(PARALLEL_GATEWAY)) {
+                //网关
+                //查找网关的父任务
+                Set<String> parentFlowNodes = queryParentFlowNode(historicActivityInstance.getActivityId(), flowNodeMap);
+                if (!parentFlowNodes.isEmpty()) {
+                    if (parentFlowNodes.size() == 1) {
+                        //如果只有一个父节点
+                        String activityId = new ArrayList<>(parentFlowNodes).get(0);
+                        if (historicActivityInstanceMap.get(activityId).get(0).getActivityType().equals(USER_TASK)) {
+                            //用户任务
+                            deleteTaskMultiple(flowNodeMap, null, null, activityId, currentTask, taskList, historicActivityInstance.getActivityId());
+                        } else {
+                            //递归去查找父任务的前一个
+                            handleBackTask(currentTask, historicActivityInstanceMap.get(activityId).get(0).getActivityId(), targetTaskId, historicTaskInstanceMap, historicActivityInstanceMap, flowNodeMap, taskList, historicActivityInstanceList);
+                        }
+                    } else {
+                        //当前节点的上级节点有多条 这里需要指定要回退的taskId
+                        deleteTaskMultiple(flowNodeMap, historicTaskInstanceMap, targetTaskId, null, currentTask, taskList, historicActivityInstance.getActivityId());
+                    }
+                } else {
+                    //没有父级任务，图有问题
+                    throw new CommonValidateException("bpmn doc error");
+                }
+
+            } else if (historicActivityInstance.getActivityType().equals(USER_TASK)) {
+                //用户任务
+                deleteTaskMultiple(flowNodeMap, null, null, historicActivityInstance.getActivityId(), currentTask, taskList, historicActivityInstance.getActivityId());
+            } else {
+                //todo 还没想好这种场景
+                throw new CommonValidateException(BPMN_NOT_SUPPORT);
+            }
+        } else {
+            //当前节点的上级节点有多条 这里需要指定要回退的taskId
+            deleteTaskMultiple(flowNodeMap, historicTaskInstanceMap, targetTaskId, null, currentTask, taskList, null);
+
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void handleSerial(Task currentTask, String taskDefinitionKey, String targetTaskId, Map<String, HistoricTaskInstance> historicTaskInstanceMap, Map<String, List<HistoricActivityInstance>> historicActivityInstanceMap, Map<String, FlowNode> flowNodeMap, List<Task> taskList, List<HistoricActivityInstance> historicActivityInstanceList) {
+        FlowNode currentNode = flowNodeMap.get(taskDefinitionKey);
+        List<SequenceFlow> sequenceFlows = currentNode.getIncomingFlows();
+        if (sequenceFlows.size() == 1) {
+            SequenceFlow sequenceFlow = sequenceFlows.get(0);
+            HistoricActivityInstance historicActivityInstance = historicActivityInstanceMap.get(sequenceFlow.getSourceRef()).get(0);
+            //网关
+            if (historicActivityInstance.getActivityType().equals(PARALLEL_GATEWAY) || historicActivityInstance.getActivityType().equals(EXCLUSIVE_GATEWAY)) {
+                //查找网关的父任务
+                Set<String> parentFlowNodes = queryParentFlowNode(historicActivityInstance.getActivityId(), flowNodeMap);
+                if (!parentFlowNodes.isEmpty()) {
+                    handleBackTaskSingle(parentFlowNodes, currentTask, targetTaskId, historicTaskInstanceMap, historicActivityInstanceMap, flowNodeMap, taskList, historicActivityInstanceList);
+                } else {
+                    //当前节点的上级节点有多条 这里需要指定要回退的taskId
+                    deleteTaskMultiple(flowNodeMap, historicTaskInstanceMap, targetTaskId, null, currentTask, taskList, null);
+                }
+            } else if (historicActivityInstance.getActivityType().equals(USER_TASK)) {
+                deleteTaskSingle(flowNodeMap, historicActivityInstance.getActivityId(), currentTask.getId());
+            } else {
+                //todo 还没想好这种场景
+                throw new CommonValidateException(BPMN_NOT_SUPPORT);
+            }
+        } else {
+            List<HistoricVariableInstance> historicVariableInstances = historyService.createHistoricVariableInstanceQuery()
+                    .processInstanceId(currentTask.getProcessInstanceId()).list();
+            Map<String, HistoricVariableInstance> historicVariableInstanceMap = historicVariableInstances.stream()
+                    .collect(Collectors.toMap(HistoricVariableInstance::getVariableName,
+                            historicVariableInstance -> historicVariableInstance, BinaryOperator.maxBy(Comparator.comparing(HistoricVariableInstance::getId))));
+            //串行的也有多条连线，可能是通过排他网关过来的
+            Set<HistoricActivityInstance> historicActivityInstances = new HashSet<>();
+            for (SequenceFlow sequenceFlow : sequenceFlows) {
+                //这边他的parent可能是没做过的，要找做过的
+                if (historicActivityInstanceMap.get(sequenceFlow.getSourceRef()) != null && querySequenceFlowCondition(sequenceFlow, historicVariableInstanceMap)) {
+                    historicActivityInstances.addAll(historicActivityInstanceMap.get(sequenceFlow.getSourceRef()));
+                }
+            }
+            //走过的只有一个
+            if (historicActivityInstances.size() == 1) {
+                List<HistoricActivityInstance> historicActivityInstancesList = new ArrayList<>(historicActivityInstances);
+                if (historicActivityInstancesList.get(0).getActivityType().equals(USER_TASK)) {
+                    deleteTaskSingle(flowNodeMap, historicActivityInstancesList.get(0).getActivityId(), currentTask.getId());
+                } else if (historicActivityInstancesList.get(0).getActivityType().equals(EXCLUSIVE_GATEWAY)) {
+                    //排他网关
+                    Set<String> parentFlowNodes = queryParentFlowNode(historicActivityInstancesList.get(0).getActivityId(), flowNodeMap);
+                    handleBackTaskSingle(parentFlowNodes, currentTask, targetTaskId, historicTaskInstanceMap, historicActivityInstanceMap, flowNodeMap, taskList, historicActivityInstanceList);
+                } else {
+                    //todo 还没想好这种场景
+                    throw new CommonValidateException(BPMN_NOT_SUPPORT);
+                }
+            } else {
+                //当前节点的上级节点有多条 这里需要指定要回退的taskId
+                deleteTaskMultiple(flowNodeMap, historicTaskInstanceMap, targetTaskId, null, currentTask, taskList, null);
+            }
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void handleBackTaskSingle(Set<String> parentFlowNodes, Task currentTask, String targetTaskId, Map<String, HistoricTaskInstance> historicTaskInstanceMap, Map<String, List<HistoricActivityInstance>> historicActivityInstanceMap, Map<String, FlowNode> flowNodeMap, List<Task> taskList, List<HistoricActivityInstance> historicActivityInstanceList) {
+        if (parentFlowNodes.size() == 1) {
+            List<String> parentFlowNodeList = new ArrayList<>(parentFlowNodes);
+            if (historicActivityInstanceMap.get(parentFlowNodeList.get(0)).get(0).getActivityType().equals(USER_TASK)) {
+                deleteTaskSingle(flowNodeMap, parentFlowNodeList.get(0), currentTask.getId());
+            } else {
+                //递归去查找父任务的前一个
+                handleBackTask(currentTask, historicActivityInstanceMap.get(parentFlowNodeList.get(0)).get(0).getActivityId(), targetTaskId, historicTaskInstanceMap, historicActivityInstanceMap, flowNodeMap, taskList, historicActivityInstanceList);
+            }
+        } else {
+            //当前节点的上级节点有多条 这里需要指定要回退的taskId
+            deleteTaskMultiple(flowNodeMap, historicTaskInstanceMap, targetTaskId, null, currentTask, taskList, null);
+        }
+    }
+
+    private void validatorTargetTask(Map<String, HistoricTaskInstance> historicTaskInstanceMap, String targetTaskId) {
+        if (StringUtils.isEmpty(targetTaskId) || StringUtils.isBlank(targetTaskId)) {
+            throw new CommonValidateException("target task id cannot be null");
+        }
+        if (historicTaskInstanceMap == null || historicTaskInstanceMap.isEmpty()) {
+            throw new CommonValidateException("historic task instance cannot be null");
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteTaskMultiple(Map<String, FlowNode> flowNodeMap, Map<String, HistoricTaskInstance> historicTaskInstanceMap, String targetTaskId, String targetTaskDefinitionKey, Task currentTask, List<Task> taskList, String targetParentTaskDefinitionKey) {
+        if (StringUtils.isEmpty(targetTaskDefinitionKey) || StringUtils.isBlank(targetTaskDefinitionKey)) {
+            validatorTargetTask(historicTaskInstanceMap, targetTaskId);
+            targetTaskDefinitionKey = historicTaskInstanceMap.get(targetTaskId).getTaskDefinitionKey();
+        }
+        FlowNode targetNode = flowNodeMap.get(targetTaskDefinitionKey);
+        ManagementService managementService = processEngine.getManagementService();
+        //删除当前任务
+        managementService.executeCommand(new DeleteTaskCmd(currentTask.getId()));
+        // 删除当前运行的其他相同父任务的子任务
+        Set<Task> sameParentTasks = getSameParentTasks(flowNodeMap, taskList, targetParentTaskDefinitionKey);
+        for (Task task : sameParentTasks) {
+            managementService.executeCommand(new DeleteTaskCmd(task.getId()));
+        }
         // 流程执行到来源节点
-        managementService.executeCommand(new SetFLowNodeAndGoCmd(
-                targetNode, executionEntityId));
+        managementService.executeCommand(new SetFLowNodeAndGoCmd(targetNode, currentTask.getExecutionId()));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteTaskSingle(Map<String, FlowNode> flowNodeMap, String targetTaskActivitiId, String currentTaskId) {
+        ManagementService managementService = processEngine.getManagementService();
+        FlowNode targetNode = flowNodeMap.get(targetTaskActivitiId);
+        // 删除当前运行任务
+        String executionEntityId = managementService.executeCommand(new DeleteTaskCmd(currentTaskId));
+        // 流程执行到来源节点
+        managementService.executeCommand(new SetFLowNodeAndGoCmd(targetNode, executionEntityId));
+    }
+
+    private Set<String> queryParentFlowNode(String activityId, Map<String, FlowNode> flowNodeMap) {
+        Set<String> flowNodeList = new HashSet<>();
+        for (String key : flowNodeMap.keySet()) {
+            if (!key.equals(activityId)) {
+                FlowNode flowNode = flowNodeMap.get(key);
+                List<SequenceFlow> sequenceFlows = flowNode.getOutgoingFlows();
+                for (SequenceFlow sequenceFlow : sequenceFlows) {
+                    if (sequenceFlow.getTargetRef().equals(activityId)) {
+                        flowNodeList.add(key);
+                        break;
+                    }
+                }
+            }
+        }
+        return flowNodeList;
+    }
+
+    private Set<Task> getSameParentTasks(Map<String, FlowNode> flowNodeMap, List<Task> taskList, String taskDefinitionKey) {
+        if (taskDefinitionKey == null) {
+            return new HashSet<>(taskList);
+        }
+        Set<Task> tasks = new HashSet<>();
+        for (Task task : taskList) {
+            List<SequenceFlow> sequenceFlows = flowNodeMap.get(task.getTaskDefinitionKey()).getIncomingFlows();
+            for (SequenceFlow sequenceFlow : sequenceFlows) {
+                if (sequenceFlow.getSourceRef().equals(taskDefinitionKey)) {
+                    tasks.add(task);
+                    break;
+                }
+            }
+        }
+        return tasks;
     }
 
 }
