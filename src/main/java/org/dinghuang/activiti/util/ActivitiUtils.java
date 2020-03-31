@@ -3,6 +3,7 @@ package org.dinghuang.activiti.util;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import org.activiti.api.process.model.builders.ProcessPayloadBuilder;
 import org.activiti.api.process.runtime.ProcessRuntime;
+import org.activiti.bpmn.converter.BpmnXMLConverter;
 import org.activiti.bpmn.model.*;
 import org.activiti.engine.*;
 import org.activiti.engine.history.*;
@@ -27,6 +28,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletResponse;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -460,54 +463,25 @@ public class ActivitiUtils {
                 .collect(Collectors.toMap(HistoricVariableInstance::getVariableName,
                         historicVariableInstance -> historicVariableInstance, BinaryOperator.maxBy(Comparator.comparing(HistoricVariableInstance::getId))));
         // 遍历历史节点
+        Map<String, FlowElement> flowElementMap = bpmnModel.getMainProcess().getFlowElements().stream().collect(Collectors.toMap(FlowElement::getId, Function.identity()));
         for (int i = 0; i < historicActivityInstances.size() - 1; i++) {
-            // 取出已执行的节点
-            HistoricActivityInstance historicActivityInstance = historicActivityInstances.get(i);
-
-            // 用以保存后续开始时间相同的节点
-            List<FlowNode> sameStartTimeNodes = new ArrayList<>();
-
-            // 获取下一个节点（用于连线）
-            List<FlowNode> sameActivityImpl = getNextFlowNode(bpmnModel, historicActivityInstanceMap, i, historicActivityInstance);
-
-            // 将后面第一个节点放在时间相同节点的集合里
-            if (sameActivityImpl != null) {
-                sameStartTimeNodes.addAll(sameActivityImpl);
-            }
-
-            // 循环后面节点，看是否有与此后继节点开始时间相同的节点，有则添加到后继节点集合
-            for (int j = i + 1; j < historicActivityInstances.size() - 1; j++) {
-                // 后续第一个节点
-                HistoricActivityInstance activityImpl1 = historicActivityInstances.get(j);
-                // 后续第二个节点
-                HistoricActivityInstance activityImpl2 = historicActivityInstances.get(j + 1);
-                if (activityImpl1.getStartTime().getTime() != activityImpl2.getStartTime().getTime()) {
-                    break;
-                }
-
-                // 如果第一个节点和第二个节点开始时间相同保存
-                FlowNode sameActivityImpl2 = (FlowNode) bpmnModel.getMainProcess().getFlowElement(activityImpl2.getActivityId());
-                sameStartTimeNodes.add(sameActivityImpl2);
-            }
-
             // 得到节点定义的详细信息
             FlowNode activityImpl = (FlowNode) bpmnModel.getMainProcess().getFlowElement(historicActivityInstances.get(i).getActivityId());
             // 取出节点的所有出去的线，对所有的线进行遍历
             List<SequenceFlow> pvmTransitions = activityImpl.getOutgoingFlows();
             for (SequenceFlow pvmTransition : pvmTransitions) {
-                // 获取节点
-                FlowNode pvmActivityImpl = (FlowNode) bpmnModel.getMainProcess().getFlowElement(pvmTransition.getTargetRef());
-
-                // 不是后继节点
-                if (!sameStartTimeNodes.contains(pvmActivityImpl)) {
-                    continue;
-                }
                 if (historicActivityInstanceMap.get(pvmTransition.getSourceRef()) != null) {
                     if (taskIds != null && !taskIds.isEmpty()) {
                         if (!taskIds.contains(historicActivityInstanceMap.get(pvmTransition.getSourceRef()).getTaskId())) {
                             //有些线是有条件的
-                            if (historicActivityInstanceMap.get(pvmTransition.getTargetRef()) != null && querySequenceFlowCondition(pvmTransition, historicVariableInstanceMap)) {
-                                highFlows.add(pvmTransition.getId());
+                            if (flowElementMap.get(pvmTransition.getTargetRef()) instanceof ExclusiveGateway) {
+                                if (querySequenceFlowCondition(pvmTransition, historicVariableInstanceMap)) {
+                                    highFlows.add(pvmTransition.getId());
+                                }
+                            } else {
+                                if (historicActivityInstanceMap.get(pvmTransition.getTargetRef()) != null && querySequenceFlowCondition(pvmTransition, historicVariableInstanceMap)) {
+                                    highFlows.add(pvmTransition.getId());
+                                }
                             }
                         }
                     } else {
@@ -966,12 +940,20 @@ public class ActivitiUtils {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public List<FlowElement> importXml(MultipartFile file) {
-        List<FlowElement> flowElements = new LinkedList<>();
+    public void importBpmnFile(MultipartFile file, String type, String typeName) {
         try {
             InputStream fileInputStream = file.getInputStream();
+            //创建转换对象
+            BpmnXMLConverter bpmnXMLConverter = new BpmnXMLConverter();
+            //读取xml文件
+            XMLInputFactory xmlInputFactory = XMLInputFactory.newInstance();
+            XMLStreamReader xmlStreamReader = xmlInputFactory.createXMLStreamReader(fileInputStream);
+            //将xml文件转换成BpmnModel
+            BpmnModel bpmnModel = bpmnXMLConverter.convertToBpmnModel(xmlStreamReader);
+            bpmnModel.getMainProcess().setId(type);
+            bpmnModel.getMainProcess().setName(typeName);
             Deployment deployment = repositoryService.createDeployment()
-                    .addInputStream(file.getName() + ".bpmn", fileInputStream)
+                    .addBpmnModel(typeName + ".bpmn", bpmnModel)
                     .key(IdWorker.getIdStr())
                     .deploy();
             ProcessDefinition processDefinition = repositoryService.createProcessDefinitionQuery().deploymentId(deployment.getId()).singleResult();
@@ -979,11 +961,6 @@ public class ActivitiUtils {
             if (model != null) {
                 Collection<FlowElement> flowElementCollection = model.getMainProcess().getFlowElements();
                 for (FlowElement e : flowElementCollection) {
-                    if (e.getClass().toString().equals("class:class org.activiti.bpmn.model.UserTask")) {
-                        //todo 可以在这里用一个中间表去维护每个任务的处理人
-                        e.setId(IdWorker.getIdStr());
-                        flowElements.add(e);
-                    }
                     LOGGER.info("flowelement id:" + e.getId() + "  name:" + e.getName() + "   class:" + e.getClass().toString());
                 }
             }
@@ -991,6 +968,6 @@ public class ActivitiUtils {
         } catch (Exception e) {
             LOGGER.error("导入流程定义失败:{}", e.getMessage(), e);
         }
-        return flowElements;
     }
+
 }

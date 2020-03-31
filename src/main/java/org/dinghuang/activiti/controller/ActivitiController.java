@@ -3,7 +3,6 @@ package org.dinghuang.activiti.controller;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
-import org.activiti.bpmn.model.FlowElement;
 import org.apache.commons.lang3.StringUtils;
 import org.dinghuang.activiti.dto.TaskDTO;
 import org.dinghuang.activiti.util.ActivitiUtils;
@@ -40,8 +39,8 @@ public class ActivitiController {
     @PostMapping(value = "/start")
     @ApiOperation(value = "启动实例流程")
     public ResponseEntity<String> start(@ApiParam(value = "xml中定义的流程id,这里是dinghuangTest", required = true)
-                                        @RequestParam String processId) {
-        org.activiti.api.process.model.ProcessInstance processInstance = activitiUtils.startProcessInstance(processId, processId, null);
+                                        @RequestParam String processDefinitionKey) {
+        org.activiti.api.process.model.ProcessInstance processInstance = activitiUtils.startProcessInstance(processDefinitionKey, processDefinitionKey, null);
         return new ResponseEntity<>(processInstance.getId(), HttpStatus.CREATED);
     }
 
@@ -104,8 +103,14 @@ public class ActivitiController {
 
     @PostMapping("import")
     @ApiOperation(value = "导入流程定义")
-    public ResponseEntity<List<FlowElement>> importXml(@RequestParam("file") MultipartFile file) {
-        return new ResponseEntity<>(activitiUtils.importXml(file), HttpStatus.OK);
+    public ResponseEntity<Boolean> importXml(@ApiParam(value = "bpmn2.0格式的文件", required = true)
+                                             @RequestParam("file") MultipartFile file,
+                                             @ApiParam(value = "type(这里以后就是发起流程的processDefinitionKey)", required = true)
+                                             @RequestParam String type,
+                                             @ApiParam(value = "typeName", required = true)
+                                             @RequestParam String typeName) {
+        activitiUtils.importBpmnFile(file, type, typeName);
+        return new ResponseEntity<>(true, HttpStatus.OK);
     }
 
 }
