@@ -7,12 +7,15 @@ import org.activiti.bpmn.converter.BpmnXMLConverter;
 import org.activiti.bpmn.model.*;
 import org.activiti.engine.*;
 import org.activiti.engine.history.*;
+import org.activiti.engine.impl.HistoricActivityInstanceQueryProperty;
 import org.activiti.engine.impl.HistoricTaskInstanceQueryProperty;
+import org.activiti.engine.impl.TaskQueryProperty;
 import org.activiti.engine.repository.Deployment;
 import org.activiti.engine.repository.ProcessDefinition;
 import org.activiti.engine.repository.ProcessDefinitionQuery;
 import org.activiti.engine.runtime.Execution;
 import org.activiti.engine.task.Task;
+import org.activiti.engine.task.TaskInfo;
 import org.activiti.image.impl.DefaultProcessDiagramGenerator;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -448,7 +451,7 @@ public class ActivitiUtils {
      * @param historicActivityInstances 历史流程已经执行的节点，并已经按执行的先后顺序排序
      * @return List<String> 流程走过的线
      */
-    public List<String> getHighLightedFlows(BpmnModel bpmnModel, List<HistoricActivityInstance> historicActivityInstances, List<String> taskIds, String processInstanceId) {
+    public List<String> getHighLightedFlows(BpmnModel bpmnModel, List<HistoricActivityInstance> historicActivityInstances, List<String> historicActivityDoneList, List<String> taskIds) {
         // 用以保存高亮的线flowId
         List<String> highFlows = new ArrayList<>();
         if (historicActivityInstances == null || historicActivityInstances.size() == 0) {
@@ -457,11 +460,7 @@ public class ActivitiUtils {
         Map<String, HistoricActivityInstance> historicActivityInstanceMap = historicActivityInstances.stream()
                 .collect(Collectors.toMap(HistoricActivityInstance::getActivityId,
                         historicActivityInstance -> historicActivityInstance, BinaryOperator.maxBy(Comparator.comparing(HistoricActivityInstance::getId))));
-        List<HistoricVariableInstance> historicVariableInstances = historyService.createHistoricVariableInstanceQuery()
-                .processInstanceId(historicActivityInstances.get(0).getProcessInstanceId()).list();
-        Map<String, HistoricVariableInstance> historicVariableInstanceMap = historicVariableInstances.stream()
-                .collect(Collectors.toMap(HistoricVariableInstance::getVariableName,
-                        historicVariableInstance -> historicVariableInstance, BinaryOperator.maxBy(Comparator.comparing(HistoricVariableInstance::getId))));
+        Map<String, HistoricVariableInstance> historicVariableInstanceMap = getHistoricVariableInstanceMap(historicActivityInstances.get(0).getProcessInstanceId());
         // 遍历历史节点
         Map<String, FlowElement> flowElementMap = bpmnModel.getMainProcess().getFlowElements().stream().collect(Collectors.toMap(FlowElement::getId, Function.identity()));
         for (int i = 0; i < historicActivityInstances.size() - 1; i++) {
@@ -470,23 +469,28 @@ public class ActivitiUtils {
             // 取出节点的所有出去的线，对所有的线进行遍历
             List<SequenceFlow> pvmTransitions = activityImpl.getOutgoingFlows();
             for (SequenceFlow pvmTransition : pvmTransitions) {
-                if (historicActivityInstanceMap.get(pvmTransition.getSourceRef()) != null) {
-                    if (taskIds != null && !taskIds.isEmpty()) {
-                        if (!taskIds.contains(historicActivityInstanceMap.get(pvmTransition.getSourceRef()).getTaskId())) {
-                            //有些线是有条件的
-                            if (flowElementMap.get(pvmTransition.getTargetRef()) instanceof ExclusiveGateway) {
-                                if (querySequenceFlowCondition(pvmTransition, historicVariableInstanceMap)) {
-                                    highFlows.add(pvmTransition.getId());
-                                }
-                            } else {
-                                if (historicActivityInstanceMap.get(pvmTransition.getTargetRef()) != null && querySequenceFlowCondition(pvmTransition, historicVariableInstanceMap)) {
-                                    highFlows.add(pvmTransition.getId());
+                if (historicActivityDoneList.contains(pvmTransition.getSourceRef())) {
+                    if (historicActivityInstanceMap.get(pvmTransition.getSourceRef()) != null) {
+                        if (taskIds != null && !taskIds.isEmpty()) {
+                            if (!taskIds.contains(historicActivityInstanceMap.get(pvmTransition.getSourceRef()).getTaskId())) {
+                                //有些线是有条件的
+                                if (flowElementMap.get(pvmTransition.getTargetRef()) instanceof ExclusiveGateway) {
+                                    if (querySequenceFlowCondition(pvmTransition, historicVariableInstanceMap)) {
+                                        highFlows.add(pvmTransition.getId());
+                                    }
+                                } else {
+                                    //还有任务的情况下，结束前面的线不要加进去
+                                    if (!(flowElementMap.get(pvmTransition.getTargetRef()) instanceof EndEvent)) {
+                                        if (historicActivityInstanceMap.get(pvmTransition.getTargetRef()) != null && querySequenceFlowCondition(pvmTransition, historicVariableInstanceMap)) {
+                                            highFlows.add(pvmTransition.getId());
+                                        }
+                                    }
                                 }
                             }
-                        }
-                    } else {
-                        if (historicActivityInstanceMap.get(pvmTransition.getTargetRef()) != null && querySequenceFlowCondition(pvmTransition, historicVariableInstanceMap)) {
-                            highFlows.add(pvmTransition.getId());
+                        } else {
+                            if (historicActivityInstanceMap.get(pvmTransition.getTargetRef()) != null && querySequenceFlowCondition(pvmTransition, historicVariableInstanceMap)) {
+                                highFlows.add(pvmTransition.getId());
+                            }
                         }
                     }
                 }
@@ -593,6 +597,16 @@ public class ActivitiUtils {
     }
 
     /**
+     * 判断流程是否完成
+     *
+     * @param processInstanceId 流程实例ID
+     * @return boolean 已完成-true，未完成-false
+     */
+    public boolean isFinished(String processInstanceId) {
+        return historyService.createHistoricProcessInstanceQuery().finished().processInstanceId(processInstanceId).count() > 0;
+    }
+
+    /**
      * 输出图像
      *
      * @param response               响应实体
@@ -624,16 +638,6 @@ public class ActivitiUtils {
         }
     }
 
-    /**
-     * 判断流程是否完成
-     *
-     * @param processInstanceId 流程实例ID
-     * @return boolean 已完成-true，未完成-false
-     */
-    public boolean isFinished(String processInstanceId) {
-        return historyService.createHistoricProcessInstanceQuery().finished().processInstanceId(processInstanceId).count() > 0;
-    }
-
     public void showImg(String instanceKey, HttpServletResponse response) {
         if (instanceKey == null) {
             LOGGER.error("process instance not exist");
@@ -652,45 +656,109 @@ public class ActivitiUtils {
         //查看已执行的节点集合, 获取流程历史中已执行节点，并按照节点在流程中执行先后顺序排序
         // 构造历史流程查询
         HistoricActivityInstanceQuery historyInstanceQuery = historyService.createHistoricActivityInstanceQuery().processInstanceId(instanceKey);
-        // 查询历史节点
-        List<HistoricActivityInstance> historicActivityInstanceList = historyInstanceQuery.orderByHistoricActivityInstanceStartTime().asc().list();
+        // 查询历史节点,根据id排序
+        List<HistoricActivityInstance> historicActivityInstanceList = historyInstanceQuery.orderBy(HistoricActivityInstanceQueryProperty.HISTORIC_ACTIVITY_INSTANCE_ID).asc().list();
         if (historicActivityInstanceList == null || historicActivityInstanceList.size() == 0) {
             LOGGER.info("process instance history node info not exist", instanceKey);
             outputImg(response, bpmnModel, null, null);
             return;
         }
-        //根据id排序
-        historicActivityInstanceList = historicActivityInstanceList.stream().sorted(Comparator.comparing(HistoricActivityInstance::getId)).collect(Collectors.toList());
-        //处理撤回这种情况
-        List<Task> tasks = taskService.createTaskQuery().processInstanceId(instanceKey).orderByTaskCreateTime().asc().list();
-        List<String> taskIds = null;
+        Map<String, FlowNode> flowNodeMap = getFlowNodeMap(historicActivityInstanceList, processInstance.getProcessDefinitionId());
+        //处理撤回这种情况 根据id排序
+        List<Task> tasks = taskService.createTaskQuery().processInstanceId(instanceKey).orderBy(TaskQueryProperty.TASK_ID).asc().list();
+        Set<String> executedActivityIdList = new LinkedHashSet<>();
+        List<String> taskIdList = tasks == null ? null : tasks.stream().map(TaskInfo::getId).collect(Collectors.toList());
+        List<String> taskKeyList = tasks == null ? null : tasks.stream().map(TaskInfo::getTaskDefinitionKey).collect(Collectors.toList());
         if (tasks != null) {
-            //根据id排序
-            tasks = tasks.stream().sorted(Comparator.comparing(Task::getId)).collect(Collectors.toList());
-            taskIds = tasks.stream().map(Task::getId).collect(Collectors.toList());
-            if (taskIds != null && !taskIds.isEmpty()) {
-                //todo 并行这种还有点问题
-                List<HistoricActivityInstance> newHistoricActivityInstanceList = new ArrayList<>(historicActivityInstanceList.size());
+            //串行
+            if (tasks.size() == 1) {
                 for (int i = 0; i < historicActivityInstanceList.size(); i++) {
-                    if (historicActivityInstanceList.get(i).getTaskId() == null || !historicActivityInstanceList.get(i).getActivityId().equals(tasks.get(tasks.size() - 1).getTaskDefinitionKey())) {
-                        newHistoricActivityInstanceList.add(historicActivityInstanceList.get(i));
+                    if (historicActivityInstanceList.get(i).getTaskId() == null || !historicActivityInstanceList.get(i).getActivityId().equals(tasks.get(0).getTaskDefinitionKey())) {
+                        executedActivityIdList.add(historicActivityInstanceList.get(i).getActivityId());
                     } else {
-                        newHistoricActivityInstanceList.add(historicActivityInstanceList.get(i));
-                        historicActivityInstanceList = newHistoricActivityInstanceList;
+                        executedActivityIdList.add(historicActivityInstanceList.get(i).getActivityId());
                         break;
                     }
                 }
+            } else {
+                List<HistoricVariableInstance> historicVariableInstances = historyService.createHistoricVariableInstanceQuery()
+                        .processInstanceId(processInstance.getId()).list();
+                Map<String, HistoricVariableInstance> historicVariableInstanceMap = historicVariableInstances.stream()
+                        .collect(Collectors.toMap(HistoricVariableInstance::getVariableName,
+                                historicVariableInstance -> historicVariableInstance, BinaryOperator.maxBy(Comparator.comparing(HistoricVariableInstance::getId))));
+                //并行
+                Collection<FlowElement> flowElementCollection = bpmnModel.getMainProcess().getFlowElements();
+                Map<String, List<String>> parentMap = new HashMap<>(tasks.size());
+                for (FlowElement flowElement : flowElementCollection) {
+                    List<String> parentCodeList = new LinkedList<>();
+                    if (flowNodeMap.get(flowElement.getId()) != null) {
+                        List<SequenceFlow> sequenceFlows = flowNodeMap.get(flowElement.getId()).getIncomingFlows();
+                        if (sequenceFlows != null && !sequenceFlows.isEmpty()) {
+                            for (SequenceFlow sequenceFlow : sequenceFlows) {
+                                parentCodeList.add(sequenceFlow.getSourceRef());
+                            }
+                            parentMap.put(flowElement.getId(), parentCodeList);
+                        }
+                    }
+                }
+                Set<String> sameParentTaskCode = new LinkedHashSet<>();
+                for (Task task : tasks) {
+                    //找到所有任务拥有相同父级的集合任务
+                    for (String taskKey : parentMap.get(task.getTaskDefinitionKey())) {
+                        for (String key : parentMap.keySet()) {
+                            if (parentMap.get(key).contains(taskKey)) {
+                                sameParentTaskCode.add(key);
+                                break;
+                            }
+                        }
+                    }
+                }
+                //说明是并行，但是做完的任务
+                for (String sameParentTask : sameParentTaskCode) {
+                    if (!taskKeyList.contains(sameParentTask)) {
+                        List<SequenceFlow> sequenceFlows = flowNodeMap.get(sameParentTask).getOutgoingFlows();
+                        if (sequenceFlows != null && !sequenceFlows.isEmpty()) {
+                            for (SequenceFlow sequenceFlow : sequenceFlows) {
+                                if (querySequenceFlowCondition(sequenceFlow, historicVariableInstanceMap)) {
+                                    executedActivityIdList.add(sequenceFlow.getTargetRef());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for (String taskKey : sameParentTaskCode) {
+                    for (int i = 0; i < historicActivityInstanceList.size(); i++) {
+                        if (historicActivityInstanceList.get(i).getTaskId() == null || !historicActivityInstanceList.get(i).getActivityId().equals(taskKey)) {
+                            executedActivityIdList.add(historicActivityInstanceList.get(i).getActivityId());
+                        } else {
+                            executedActivityIdList.add(historicActivityInstanceList.get(i).getActivityId());
+                            break;
+                        }
+                    }
+
+                }
             }
         }
-
-        // 已执行的节点ID集合(将historicActivityInstanceList中元素的activityId字段取出封装到executedActivityIdList)
-        List<String> executedActivityIdList = historicActivityInstanceList.stream().map(HistoricActivityInstance::getActivityId).collect(Collectors.toList());
-
         //获取流程走过的线
-        List<String> flowIds = getHighLightedFlows(bpmnModel, historicActivityInstanceList, taskIds, instanceKey);
-
+        List<String> executedActivityIdListResult = new ArrayList<>(executedActivityIdList);
+        List<String> flowIds = getHighLightedFlows(bpmnModel, historicActivityInstanceList, executedActivityIdListResult, taskIdList);
         //输出图像，并设置高亮
-        outputImg(response, bpmnModel, flowIds, executedActivityIdList);
+        outputImg(response, bpmnModel, flowIds, executedActivityIdListResult);
+    }
+
+    private Map<String, FlowNode> getFlowNodeMap(List<HistoricActivityInstance> historicActivityInstanceList, String processDefinitionId) {
+        org.activiti.bpmn.model.Process process = repositoryService
+                .getBpmnModel(processDefinitionId)
+                .getMainProcess();
+        Map<String, FlowNode> flowNodeMap = new HashMap<>(historicActivityInstanceList.size());
+        for (HistoricActivityInstance historicActivityInstance : historicActivityInstanceList) {
+            if (flowNodeMap.get(historicActivityInstance.getActivityId()) == null) {
+                FlowNode sourceNode = (FlowNode) process.getFlowElement(historicActivityInstance.getActivityId());
+                flowNodeMap.put(historicActivityInstance.getActivityId(), sourceNode);
+            }
+        }
+        return flowNodeMap;
     }
 
     /**
@@ -702,15 +770,11 @@ public class ActivitiUtils {
     @Transactional(rollbackFor = Exception.class)
     public void backTask(String currentTaskId, String targetTaskId) {
         //准备数据
-        RepositoryService repositoryService = processEngine.getRepositoryService();
         TaskService taskService = processEngine.getTaskService();
         // 当前任务
         Task currentTask = taskService.createTaskQuery().taskId(currentTaskId).singleResult();
         String processInstanceId = currentTask.getProcessInstanceId();
         // 获取流程定义
-        org.activiti.bpmn.model.Process process = repositoryService
-                .getBpmnModel(currentTask.getProcessDefinitionId())
-                .getMainProcess();
         //任务历史数据
         List<HistoricTaskInstance> historicTaskInstances = historyService
                 .createHistoricTaskInstanceQuery()
@@ -721,15 +785,9 @@ public class ActivitiUtils {
         Map<String, HistoricTaskInstance> historicTaskInstanceMap = historicTaskInstances.stream().collect(Collectors.toMap(HistoricTaskInstance::getId, Function.identity()));
         //所有节点操作数据
         HistoricActivityInstanceQuery historyInstanceQuery = historyService.createHistoricActivityInstanceQuery().processInstanceId(processInstanceId);
-        List<HistoricActivityInstance> historicActivityInstanceList = historyInstanceQuery.orderByHistoricActivityInstanceStartTime().asc().list();
+        List<HistoricActivityInstance> historicActivityInstanceList = historyInstanceQuery.orderBy(HistoricActivityInstanceQueryProperty.HISTORIC_ACTIVITY_INSTANCE_ID).asc().list();
         Map<String, List<HistoricActivityInstance>> historicActivityInstanceMap = historicActivityInstanceList.stream().collect(Collectors.groupingBy(HistoricActivityInstance::getActivityId));
-        Map<String, FlowNode> flowNodeMap = new HashMap<>(historicActivityInstanceList.size());
-        for (HistoricActivityInstance historicActivityInstance : historicActivityInstanceList) {
-            if (flowNodeMap.get(historicActivityInstance.getActivityId()) == null) {
-                FlowNode sourceNode = (FlowNode) process.getFlowElement(historicActivityInstance.getActivityId());
-                flowNodeMap.put(historicActivityInstance.getActivityId(), sourceNode);
-            }
-        }
+        Map<String, FlowNode> flowNodeMap = getFlowNodeMap(historicActivityInstanceList, currentTask.getProcessDefinitionId());
         //排除当前任务外的所有正在进行的任务
         List<Task> taskList = taskService.createTaskQuery().processInstanceId(processInstanceId).list().stream().filter(task -> !task.getId().equals(currentTask.getId())).collect(Collectors.toList());
         handleBackTask(currentTask, currentTask.getTaskDefinitionKey(), targetTaskId, historicTaskInstanceMap, historicActivityInstanceMap, flowNodeMap, taskList, historicActivityInstanceList);
@@ -818,11 +876,7 @@ public class ActivitiUtils {
                 throw new CommonValidateException(BPMN_NOT_SUPPORT);
             }
         } else {
-            List<HistoricVariableInstance> historicVariableInstances = historyService.createHistoricVariableInstanceQuery()
-                    .processInstanceId(currentTask.getProcessInstanceId()).list();
-            Map<String, HistoricVariableInstance> historicVariableInstanceMap = historicVariableInstances.stream()
-                    .collect(Collectors.toMap(HistoricVariableInstance::getVariableName,
-                            historicVariableInstance -> historicVariableInstance, BinaryOperator.maxBy(Comparator.comparing(HistoricVariableInstance::getId))));
+            Map<String, HistoricVariableInstance> historicVariableInstanceMap = getHistoricVariableInstanceMap(currentTask.getProcessInstanceId());
             //串行的也有多条连线，可能是通过排他网关过来的
             Set<HistoricActivityInstance> historicActivityInstances = new HashSet<>();
             for (SequenceFlow sequenceFlow : sequenceFlows) {
@@ -849,6 +903,15 @@ public class ActivitiUtils {
                 deleteTaskMultiple(flowNodeMap, historicTaskInstanceMap, targetTaskId, null, currentTask, taskList, null);
             }
         }
+    }
+
+    private Map<String, HistoricVariableInstance> getHistoricVariableInstanceMap(String processInstanceId) {
+        List<HistoricVariableInstance> historicVariableInstances = historyService.createHistoricVariableInstanceQuery()
+                .processInstanceId(processInstanceId).list();
+        Map<String, HistoricVariableInstance> historicVariableInstanceMap = historicVariableInstances.stream()
+                .collect(Collectors.toMap(HistoricVariableInstance::getVariableName,
+                        historicVariableInstance -> historicVariableInstance, BinaryOperator.maxBy(Comparator.comparing(HistoricVariableInstance::getId))));
+        return historicVariableInstanceMap;
     }
 
     @Transactional(rollbackFor = Exception.class)

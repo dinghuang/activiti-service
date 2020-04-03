@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:activiti="http://activiti.org/bpmn" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:tns="http://bpmn.io/schema/bpmn" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" expressionLanguage="http://www.w3.org/1999/XPath" id="Definitions_0colzef" name="" targetNamespace="http://bpmn.io/schema/bpmn" typeLanguage="http://www.w3.org/2001/XMLSchema">
-  <bpmn:process isClosed="false" id = "productSetUp" name = "产品设立" isExecutable="true" processType="None">
+  <bpmn:process id="productSetUp" isClosed="false" isExecutable="true" name="产品设立" processType="None">
     <bpmn:startEvent id="StartEvent_1juck4y" name="开始"/>
     <bpmn:exclusiveGateway gatewayDirection="Unspecified" id="Gateway_1ji80t7" name="是否需要法律岗审批"/>
     <bpmn:sequenceFlow id="Flow_0poo2e1" sourceRef="StartEvent_1juck4y" targetRef="Activity_1l60243"/>
